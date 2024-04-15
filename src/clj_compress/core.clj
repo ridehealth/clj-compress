@@ -89,24 +89,26 @@
   At first, input data is moved to tar archive, then tar archive is compressed by `compressor`.
   An archive extension will be added automatically and depends on `compressor` type.
   Returns created archive file name as `String`."
-  [^String new-arch-name input-files-vec ^String out-folder ^String compressor]
-  (let [out-fname (new-archive-name new-arch-name out-folder compressor)
-        fo        (io/output-stream out-fname)
-        cfo       (.createCompressorOutputStream (CompressorStreamFactory.) compressor fo)
-        a         (TarArchiveOutputStream. cfo)]
-    (doseq [input-name input-files-vec]
-      (let [folder? (.isDirectory (io/file input-name))]
-        (doseq [f (if folder? (file-seq (io/file input-name)) [(io/file input-name)])]
-          (when (and (.isFile f) (not= out-fname (.getPath ^File f)))
-            (let [entry-name (relativise-path (FilenameUtils/getPath input-name) (-> f .getPath))
-                  entry      (.createArchiveEntry a f entry-name)]
-              (.putArchiveEntry a entry)
-              (when (.isFile f)
-                (IOUtils/copy (io/input-stream f) a))
-              (.closeArchiveEntry a))))))
-    (.finish a)
-    (.close a)
-    out-fname))
+  ([^String new-arch-name input-files-vec ^String out-folder ^String compressor]
+   (create-archive new-arch-name (FilenameUtils/getPrefix out-folder) input-files-vec out-folder compressor))
+  ([^String new-arch-name ^String base input-files-vec ^String out-folder ^String compressor]
+   (let [out-fname (new-archive-name new-arch-name out-folder compressor)
+         fo        (io/output-stream out-fname)
+         cfo       (.createCompressorOutputStream (CompressorStreamFactory.) compressor fo)
+         a         (TarArchiveOutputStream. cfo)]
+     (doseq [input-name input-files-vec]
+       (let [folder? (.isDirectory (io/file input-name))]
+         (doseq [f (if folder? (file-seq (io/file input-name)) [(io/file input-name)])]
+           (when (and (.isFile f) (not= out-fname (.getPath ^File f)))
+             (let [entry-name (relativise-path base (-> f .getPath))
+                   entry      (.createArchiveEntry a f entry-name)]
+               (.putArchiveEntry a entry)
+               (when (.isFile f)
+                 (IOUtils/copy (io/input-stream f) a))
+               (.closeArchiveEntry a))))))
+     (.finish a)
+     (.close a)
+     out-fname)))
 
 (defn decompress-archive
   "decompress data from archive to `out-folder` directory.
