@@ -32,8 +32,8 @@ For Deps CLI add to deps.edn:  ```{:deps {middlesphere/clj-compress {:mvn/versio
     (let [s           "ABACABACABADEABACABACABADEABACABACABADEABACABACABADE"
           sbuf        (.getBytes s)
           compressor  "lzma"
-          cbuf        (ByteArrayOutputStream.)
-          coutbuf     (ByteArrayOutputStream.)
+          cbuf        (ByteArrayOutputStream/new)
+          coutbuf     (ByteArrayOutputStream/new)
           comp-size   (c/compress-data sbuf cbuf compressor)
           decomp-size (c/decompress-data (.toByteArray cbuf) coutbuf compressor)]
       (println (format "compressor: %s, src size: %s, compressed: %s, decompressed: %s."

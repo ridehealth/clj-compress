@@ -2,22 +2,25 @@
   (:require
    [clojure.java.io :as io])
   (:import
-   (java.io File BufferedInputStream)
-   (org.apache.commons.compress.archivers ArchiveStreamFactory)
-   (org.apache.commons.compress.archivers.tar TarArchiveOutputStream)
-   (org.apache.commons.compress.compressors CompressorStreamFactory)
+   (java.io BufferedInputStream File InputStream OutputStream)
+   (java.net URI)
+   (org.apache.commons.compress.archivers ArchiveInputStream ArchiveStreamFactory)
+   (org.apache.commons.compress.archivers.tar TarArchiveEntry TarArchiveOutputStream)
+   (org.apache.commons.compress.compressors CompressorInputStream CompressorOutputStream CompressorStreamFactory)
    (org.apache.commons.compress.utils IOUtils)
    (org.apache.commons.io FilenameUtils)))
 
-(def compressors ["lzma" "gz" "bzip2" "snappy-framed" "deflate" "lz4-framed" "xz"])
+(def compressors
+  ["bzip2" "deflate" "gz" "lz4-framed" "lzma" "snappy-framed" "xz"])
 
-(def archive-extensions {"lzma"          ".tar.lzma"
-                         "gz"            ".tar.gz"
-                         "bzip2"         ".tar.bz2"
-                         "snappy-framed" ".tar.sz"
-                         "deflate"       ".tar.gz"
-                         "lz4-framed"    ".tar.lz4"
-                         "xz"            ".tar.xz"})
+(def archive-extensions
+  {"bzip2"         ".tar.bz2"
+   "deflate"       ".tar.gz"
+   "gz"            ".tar.gz"
+   "lz4-framed"    ".tar.lz4"
+   "lzma"          ".tar.lzma"
+   "snappy-framed" ".tar.sz"
+   "xz"            ".tar.xz"})
 
 (defn compress-data
   "compress `src` using particular `compressor` and write compressed data into `dest`.
@@ -31,15 +34,15 @@
   (let [in    (io/input-stream src)
         f-out (io/output-stream dest)]
     (try
-      (let [out    (.createCompressorOutputStream (CompressorStreamFactory.) compressor f-out)
+      (let [out    (CompressorStreamFactory/.createCompressorOutputStream (CompressorStreamFactory/new) compressor f-out)
             length (IOUtils/copy in out)]
-        (.flush out)
-        (.close in)
-        (.close out)
+        (CompressorOutputStream/.flush out)
+        (InputStream/.close in)
+        (CompressorOutputStream/.close out)
         length)
       (catch Exception e
-        (.close in)
-        (.close f-out)
+        (InputStream/.close in)
+        (OutputStream/.close f-out)
         (throw e)))))
 
 (defn decompress-data
@@ -53,15 +56,15 @@
   (let [in    (io/input-stream src)
         f-out (io/output-stream dest)]
     (try
-      (let [in     (.createCompressorInputStream (CompressorStreamFactory.) decompressor in)
+      (let [in     (CompressorStreamFactory/.createCompressorInputStream (CompressorStreamFactory/new) decompressor in)
             length (IOUtils/copy in f-out)]
-        (.flush f-out)
-        (.close in)
-        (.close f-out)
+        (OutputStream/.flush f-out)
+        (CompressorInputStream/.close in)
+        (OutputStream/.close f-out)
         length)
       (catch Exception e
-        (.close in)
-        (.close f-out)
+        (InputStream/.close in)
+        (OutputStream/.close f-out)
         (throw e)))))
 
 (defn- new-archive-name
@@ -77,9 +80,9 @@
   "create relative archive entry name"
   [base path]
   (let [f        (io/file base)
-        uri      (.toURI f)
-        relative (.relativize uri (-> path io/file .toURI))]
-    (.getPath relative)))
+        uri      (File/.toURI f)
+        relative (URI/.relativize uri (-> path io/file File/.toURI))]
+    (URI/.getPath relative)))
 
 (defn create-archive
   "Create archive for given bulk of files or folders `input-files-vec` (String names vector).
@@ -94,20 +97,20 @@
   ([^String new-arch-name ^String base input-files-vec ^String out-folder ^String compressor]
    (let [out-fname (new-archive-name new-arch-name out-folder compressor)
          fo        (io/output-stream out-fname)
-         cfo       (.createCompressorOutputStream (CompressorStreamFactory.) compressor fo)
-         a         (TarArchiveOutputStream. cfo)]
+         cfo       (CompressorStreamFactory/.createCompressorOutputStream (CompressorStreamFactory/new) compressor fo)
+         a         (TarArchiveOutputStream/new cfo)]
      (doseq [input-name input-files-vec]
-       (let [folder? (.isDirectory (io/file input-name))]
+       (let [folder? (File/.isDirectory (io/file input-name))]
          (doseq [f (if folder? (file-seq (io/file input-name)) [(io/file input-name)])]
-           (when (and (.isFile f) (not= out-fname (.getPath ^File f)))
-             (let [entry-name (relativise-path base (-> f .getPath))
-                   entry      (.createArchiveEntry a f entry-name)]
-               (.putArchiveEntry a entry)
-               (when (.isFile f)
+           (when (and (File/.isFile f) (not= out-fname (File/.getPath f)))
+             (let [entry-name (relativise-path base (File/.getPath f))
+                   entry      (^[File String] TarArchiveOutputStream/.createArchiveEntry a f entry-name)]
+               (TarArchiveOutputStream/.putArchiveEntry a entry)
+               (when (File/.isFile f)
                  (IOUtils/copy (io/input-stream f) a))
-               (.closeArchiveEntry a))))))
-     (.finish a)
-     (.close a)
+               (TarArchiveOutputStream/.closeArchiveEntry a))))))
+     (TarArchiveOutputStream/.finish a)
+     (TarArchiveOutputStream/.close a)
      out-fname)))
 
 (defn decompress-archive
@@ -116,47 +119,53 @@
   `compressor` is optional argument, ArchiveStreamFactory tries to guess compressor type based on archive extension.
   returns number of decompressed entries (files)."
   [^String arch-name ^String out-folder & [compressor]]
-  (let [in         (BufferedInputStream. (io/input-stream (io/file arch-name)))
-        cis        (if compressor (.createCompressorInputStream (CompressorStreamFactory.) compressor in)
-                       (.createCompressorInputStream (CompressorStreamFactory.) in))
-        ais        (.createArchiveInputStream (ArchiveStreamFactory.) ArchiveStreamFactory/TAR cis)
-        file-count (loop [entry (.getNextEntry ais)
+  (let [in         (BufferedInputStream/new (io/input-stream (io/file arch-name)))
+        cis        (if compressor
+                     (^[String InputStream] CompressorStreamFactory/.createCompressorInputStream (CompressorStreamFactory/new) compressor in)
+                     (CompressorStreamFactory/.createCompressorInputStream (CompressorStreamFactory/new) in))
+        ais        (ArchiveStreamFactory/.createArchiveInputStream (ArchiveStreamFactory/new) ArchiveStreamFactory/TAR cis)
+        file-count (loop [entry (ArchiveInputStream/.getNextEntry ais)
                           cnt   0]
                      (if entry
-                       (let [save-path (str out-folder File/separatorChar (.getName entry))
-                             out-file  (File. save-path)]
-                         (if (.isDirectory entry)
-                           (when-not (.exists out-file)
-                             (.mkdirs out-file))
-                           (let [parent-dir (File. (.substring save-path 0 (.lastIndexOf save-path (int File/separatorChar))))]
-                             (when-not (.exists parent-dir) (.mkdirs parent-dir))
+                       (let [save-path (str out-folder File/separatorChar (TarArchiveEntry/.getName entry))
+                             out-file  (File/new save-path)]
+                         (if (TarArchiveEntry/.isDirectory entry)
+                           (when-not (File/.exists out-file)
+                             (File/.mkdirs out-file))
+                           (let [parent-dir (File/new (String/.substring save-path 0 (String/.lastIndexOf save-path (int File/separatorChar))))]
+                             (when-not (File/.exists parent-dir)
+                               (File/.mkdirs parent-dir))
                              (io/copy ais out-file :buffer-size 8192)))
-                         (recur (.getNextEntry ais) (inc cnt)))
+                         (recur (ArchiveInputStream/.getNextEntry ais) (inc cnt)))
                        cnt))]
-    (.close ais)
-    (.close cis)
-    (.close in)
+    (ArchiveInputStream/.close ais)
+    (CompressorInputStream/.close cis)
+    (BufferedInputStream/.close in)
     file-count))
 
 (defn list-archive
   "return list of archived items"
   [^String arch-name & [compressor]]
-  (let [in         (BufferedInputStream. (io/input-stream (io/file arch-name)))
-        cis        (if compressor (.createCompressorInputStream (CompressorStreamFactory.) compressor in)
-                       (.createCompressorInputStream (CompressorStreamFactory.) in))
-        ais        (.createArchiveInputStream (ArchiveStreamFactory.) ArchiveStreamFactory/TAR cis)
-        file-count (loop [entry      (.getNextEntry ais)
-                          cnt        0
+  (let [in         (BufferedInputStream/new (io/input-stream (io/file arch-name)))
+        cis        (if compressor
+                     (^[String InputStream] CompressorStreamFactory/.createCompressorInputStream (CompressorStreamFactory/new) compressor in)
+                     (CompressorStreamFactory/.createCompressorInputStream (CompressorStreamFactory/new) in))
+        ais        (ArchiveStreamFactory/.createArchiveInputStream (ArchiveStreamFactory/new) ArchiveStreamFactory/TAR cis)
+        file-count (loop [entry     (ArchiveInputStream/.getNextEntry ais)
+                          cnt       0
                           item-list []]
                      (if entry
-                       (recur (.getNextEntry ais) (inc cnt) (conj item-list {:item/name          (.getName entry)
-                                                                             :item/size          (.getSize entry)
-                                                                             :item/last-modified (.getLastModifiedDate entry)}))
+                       (recur
+                        (ArchiveInputStream/.getNextEntry ais)
+                        (inc cnt)
+                        (conj item-list {:item/name          (TarArchiveEntry/.getName entry)
+                                         :item/size          (TarArchiveEntry/.getSize entry)
+                                         :item/last-modified (TarArchiveEntry/.getLastModifiedDate entry)}))
                        {:item/count cnt
-                        :item/list item-list}))]
-    (.close ais)
-    (.close cis)
-    (.close in)
+                        :item/list  item-list}))]
+    (ArchiveInputStream/.close ais)
+    (CompressorInputStream/.close cis)
+    (BufferedInputStream/.close in)
     file-count))
 
 (comment
