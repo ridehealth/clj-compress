@@ -1,13 +1,13 @@
-{:paths   ["src"]
+{:paths ["src"]
  :deps
- {org.clojure/clojure                 {:mvn/version "1.11.2"}
-  org.tukaani/xz                      {:mvn/version "1.9"}
+ {org.clojure/clojure                 {:mvn/version "1.12.0"}
+  commons-io/commons-io               {:mvn/version "2.17.0"}
+  org.apache.commons/commons-compress {:mvn/version "1.27.1"}
   org.brotli/dec                      {:mvn/version "0.1.2"}
-  org.apache.commons/commons-compress {:mvn/version "1.26.1"}
-  commons-io/commons-io               {:mvn/version "2.16.1"}}
+  org.tukaani/xz                      {:mvn/version "1.10"}}
  :aliases
  {:test
   {:extra-paths ["test"]
    :extra-deps  {org.clojure/test.check {:mvn/version "1.1.1"}
-                 lambdaisland/kaocha    {:mvn/version "1.88.1376"}}
+                 lambdaisland/kaocha    {:mvn/version "1.91.1392"}}
    :exec-fn     kaocha.runner/exec-fn}}}
